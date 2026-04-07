@@ -47,8 +47,8 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 //const supabaseUrl = '';
 //const supabaseAnonKey = '';
 
-//const isSupabaseConfigured = supabaseUrl && supabaseAnonKey;
-//const supabase = isSupabaseConfigured ? createClient(supabaseUrl, supabaseAnonKey) : null;
+const isSupabaseConfigured = supabaseUrl && supabaseAnonKey;
+const supabase = isSupabaseConfigured ? createClient(supabaseUrl, supabaseAnonKey) : null;
 // ----------------------------------------------------------------------
 
 // --- UTILS ---
