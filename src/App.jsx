@@ -37,25 +37,18 @@ import {
 // ----------------------------------------------------------------------
 // 1. CẤU HÌNH SUPABASE (DÀNH CHO LOCAL & VERCEL)
 // ----------------------------------------------------------------------
-// LƯU Ý QUAN TRỌNG KHI CHẠY Ở MÁY TÍNH (LOCAL):
-// 1. Cài đặt thư viện bằng lệnh: npm install @supabase/supabase-js
-// 2. Bỏ comment dòng import dưới đây để kích hoạt tính năng kết nối Database:
+// LƯU Ý KHI CHẠY TRÊN MÁY TÍNH (LOCAL): Hãy BỎ COMMENT 3 dòng code dưới đây
 import { createClient } from '@supabase/supabase-js';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Hàm giả lập (Mock) tạm thời để môi trường xem trước web này không bị lỗi biên dịch:
-// const createClient = (url, key) => { return null; };
+// DÀNH CHO MÔI TRƯỜNG PREVIEW TRÊN WEB NÀY (Mock để không bị lỗi biên dịch):
+//const createClient = (url, key) => { return null; };
+//const supabaseUrl = '';
+//const supabaseAnonKey = '';
 
-// Code ưu tiên lấy từ biến môi trường (khi deploy trên Vercel).
-// LƯU Ý KHI MANG CODE VỀ CHẠY Ở MÁY TÍNH (VITE), BẠN HÃY DÙNG 2 DÒNG NÀY (Bỏ comment):
-// const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-// const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-
-// Tạm thời gán chuỗi tĩnh để môi trường web preview này không bị lỗi:
-const supabaseUrl = '';
-const supabaseAnonKey = '';
-
-const isSupabaseConfigured = supabaseUrl && supabaseAnonKey && supabaseUrl !== 'YOUR_SUPABASE_URL';
-const supabase = isSupabaseConfigured ? createClient(supabaseUrl, supabaseAnonKey) : null;
+//const isSupabaseConfigured = supabaseUrl && supabaseAnonKey;
+//const supabase = isSupabaseConfigured ? createClient(supabaseUrl, supabaseAnonKey) : null;
 // ----------------------------------------------------------------------
 
 // --- UTILS ---
