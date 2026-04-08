@@ -1,11 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
 
+// ----------------------------------------------------------------------
+// 1. CẤU HÌNH SUPABASE (HƯỚNG CODE CŨ - KẾT NỐI TRỰC TIẾP)
+// ----------------------------------------------------------------------
 /**
- * Ghi chú dành cho môi trường Local:
+ * LƯU Ý KHI CHẠY Ở LOCAL (MÁY TÍNH):
  * 1. Chạy lệnh: npm install @supabase/supabase-js
- * 2. Mở comment dòng import dưới đây
+ * 2. Thay đổi dòng import bên dưới thành: import { createClient } from '@supabase/supabase-js';
  */
-// import { createClient } from '@supabase/supabase-js';
+// Sử dụng CDN để đảm bảo môi trường preview này không bị lỗi Resolve
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 import { 
   LayoutDashboard, 
@@ -43,38 +47,28 @@ import {
   Coins
 } from 'lucide-react';
 
-// ----------------------------------------------------------------------
-// 1. CẤU HÌNH KẾT NỐI (FIX LỖI IMPORT.META VÀ RESOLVE MODULE)
-// ----------------------------------------------------------------------
-// Hàm lấy biến môi trường an toàn để không làm sập trình biên dịch preview
-const getSafeEnv = (key) => {
+// Truy cập biến môi trường an toàn để tránh lỗi esbuild ES2015 target
+const getEnv = (key) => {
   try {
-    // Sử dụng cách truy cập gián tiếp để tránh lỗi esbuild khi gặp import.meta
-    const env = (import.meta as any).env;
-    return env ? env[key] : '';
+    // @ts-ignore
+    return import.meta.env[key] || '';
   } catch (e) {
     return '';
   }
 };
 
-const supabaseUrl = getSafeEnv('VITE_SUPABASE_URL');
-const supabaseAnonKey = getSafeEnv('VITE_SUPABASE_ANON_KEY');
+const supabaseUrl = getEnv('VITE_SUPABASE_URL');
+const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY');
 
-// Khởi tạo Supabase Client an toàn
-let supabase = null;
-const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey && typeof createClient !== 'undefined');
+// Khởi tạo Supabase Client
+const supabase = (supabaseUrl && supabaseAnonKey) 
+  ? createClient(supabaseUrl, supabaseAnonKey) 
+  : null;
 
-if (isSupabaseConfigured) {
-  try {
-    // @ts-ignore
-    supabase = createClient(supabaseUrl, supabaseAnonKey);
-  } catch (e) {
-    console.warn("Lỗi khởi tạo Supabase:", e);
-  }
-}
+const isSupabaseConfigured = !!supabase;
 // ----------------------------------------------------------------------
 
-// --- UTILS ---
+// --- CÁC HÀM TIỆN ÍCH (UTILS) ---
 const getLocalISODate = (d = new Date()) => {
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -145,18 +139,20 @@ const App = () => {
     return () => clearInterval(timer);
   }, []);
 
+  // ĐỒNG BỘ DỮ LIỆU LOCALSTORAGE (CHỈ KHI KHÔNG CÓ SUPABASE)
   useEffect(() => {
-    if (!supabase) {
+    if (!isSupabaseConfigured) {
       localStorage.setItem('m_shops', JSON.stringify(shops));
       localStorage.setItem('m_logs', JSON.stringify(adsLogs));
       localStorage.setItem('m_providers', JSON.stringify(providers));
       localStorage.setItem('m_p_payments', JSON.stringify(providerPayments));
     }
-  }, [shops, adsLogs, providers, providerPayments]);
+  }, [shops, adsLogs, providers, providerPayments, isSupabaseConfigured]);
 
+  // TẢI DỮ LIỆU KHỞI TẠO
   useEffect(() => {
     const fetchData = async () => {
-      if (!supabase) {
+      if (!isSupabaseConfigured) {
         const savedShops = JSON.parse(localStorage.getItem('m_shops') || '[]');
         const savedLogs = JSON.parse(localStorage.getItem('m_logs') || '[]');
         const savedProviders = JSON.parse(localStorage.getItem('m_providers') || '[]');
@@ -209,7 +205,7 @@ const App = () => {
           providerId: pp.provider_id 
         })));
       } catch (error) {
-        console.error("Lỗi fetch dữ liệu:", error);
+        console.error("Lỗi fetch dữ liệu Supabase:", error);
       } finally {
         setIsLoading(false);
       }
@@ -218,6 +214,7 @@ const App = () => {
     fetchData();
   }, [isSupabaseConfigured]);
 
+  // --- LOGIC TÍNH TOÁN ---
   const currentMonthLogs = useMemo(() => {
     return adsLogs.filter(log => {
       const d = new Date(log.date);
@@ -312,7 +309,7 @@ const App = () => {
     e.stopPropagation();
     const newStatus = log.status === 'unpaid' ? 'paid' : 'unpaid';
     setAdsLogs(adsLogs.map(l => l.id === log.id ? { ...l, status: newStatus } : l));
-    if (supabase) {
+    if (isSupabaseConfigured) {
       await supabase.from('ads_logs').update({ status: newStatus }).eq('id', log.id);
     }
   };
@@ -330,7 +327,7 @@ const App = () => {
       fee_percent: shop?.percent || 0, provider_id: provider?.id || null, provider_rental_fee: provider?.rentalFee || 0
     };
 
-    if (supabase) {
+    if (isSupabaseConfigured) {
       if (editingLog) {
         const { data } = await supabase.from('ads_logs').update(logData).eq('id', editingLog.id).select();
         if (data) setAdsLogs(adsLogs.map(l => l.id === editingLog.id ? { ...data[0], shopId: data[0].shop_id, feePercent: data[0].fee_percent } : l));
@@ -346,7 +343,7 @@ const App = () => {
   };
 
   const handleDeleteLog = async (id) => {
-    if (supabase) await supabase.from('ads_logs').delete().eq('id', id);
+    if (isSupabaseConfigured) await supabase.from('ads_logs').delete().eq('id', id);
     setAdsLogs(adsLogs.filter(l => l.id !== id));
     setShowAddLogModal(false);
   };
@@ -355,7 +352,7 @@ const App = () => {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
     const shopData = { name: fd.get('name'), percent: parseFloat(fd.get('percent')), provider_id: fd.get('providerId') };
-    if (supabase) {
+    if (isSupabaseConfigured) {
       const { data } = editingShop ? await supabase.from('shops').update(shopData).eq('id', editingShop.id).select() : await supabase.from('shops').insert([shopData]).select();
       if (data) setShops(editingShop ? shops.map(s => s.id === editingShop.id ? { ...data[0], providerId: data[0].provider_id } : s) : [...shops, { ...data[0], providerId: data[0].provider_id }]);
     } else {
@@ -369,7 +366,7 @@ const App = () => {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
     const pData = { name: fd.get('name'), rental_fee: parseFloat(fd.get('rentalFee')) };
-    if (supabase) {
+    if (isSupabaseConfigured) {
       const { data } = editingProvider ? await supabase.from('providers').update(pData).eq('id', editingProvider.id).select() : await supabase.from('providers').insert([pData]).select();
       if (data) setProviders(editingProvider ? providers.map(p => p.id === editingProvider.id ? { ...data[0], rentalFee: data[0].rental_fee } : p) : [...providers, { ...data[0], rentalFee: data[0].rental_fee }]);
     } else {
@@ -383,7 +380,7 @@ const App = () => {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
     const payData = { provider_id: selectedProviderId, amount: parseFloat(fd.get('amount').toString().replace(/\D/g, '')), date: fd.get('date'), note: fd.get('note') };
-    if (supabase) {
+    if (isSupabaseConfigured) {
       const { data } = await supabase.from('provider_payments').insert([payData]).select();
       if (data) setProviderPayments([...providerPayments, { ...data[0], amount: Number(data[0].amount), providerId: data[0].provider_id }]);
     } else {
@@ -404,7 +401,7 @@ const App = () => {
 
   const HomeView = () => (
     <div className="space-y-5 pb-24">
-      {/* Dashboard Thống kê tháng */}
+      {/* Nhóm khung Dashboard */}
       <div className="bg-white p-2 rounded-[32px] border border-slate-100 shadow-sm space-y-2">
         <div className="bg-gradient-to-br from-indigo-600 via-blue-700 to-slate-900 rounded-[26px] p-6 text-white relative overflow-hidden">
           <div className="relative z-10">
@@ -436,15 +433,15 @@ const App = () => {
         </div>
       </div>
 
-      {/* Lịch và Nhật ký ngày */}
+      {/* Nhật ký ngày */}
       <div>
-        <div className="flex justify-between items-center bg-white p-1.5 rounded-[24px] border border-slate-100 shadow-sm mb-4 w-full">
+        <div className="flex justify-between items-center bg-white p-1.5 rounded-[24px] border border-slate-100 shadow-sm mb-4 w-full overflow-x-auto no-scrollbar">
           {[...Array(7)].map((_, i) => {
             const d = new Date(); d.setDate(d.getDate() - (6 - i));
             const dateStr = getLocalISODate(d);
             const isSelected = dateStr === selectedDate;
             return (
-              <button key={i} onClick={() => setSelectedDate(dateStr)} className={`flex flex-col items-center justify-center gap-1 p-2 rounded-[18px] transition-all flex-1 ${isSelected ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>
+              <button key={i} onClick={() => setSelectedDate(dateStr)} className={`flex flex-col items-center justify-center gap-1 p-2 rounded-[18px] transition-all min-w-[48px] flex-1 ${isSelected ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>
                 <span className="text-[9px] font-black uppercase">{d.toLocaleDateString('vi-VN', { weekday: 'short' })}</span>
                 <span className="text-sm font-black">{d.getDate()}</span>
               </button>
@@ -492,7 +489,7 @@ const App = () => {
                   </div>
                </div>
              );
-          }) : <div className="text-center py-12 bg-white rounded-3xl border-2 border-dashed border-slate-100"><Info size={24} className="mx-auto text-slate-200 mb-2"/><p className="text-slate-300 font-bold text-[10px] uppercase">Trống ngày {selectedDate.split('-')[2]}/{selectedDate.split('-')[1]}</p></div>}
+          }) : <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-slate-200"><Info size={24} className="mx-auto text-slate-200 mb-2"/><p className="text-slate-300 font-bold text-[10px] uppercase">Trống ngày {selectedDate.split('-')[2]}/{selectedDate.split('-')[1]}</p></div>}
         </div>
       </div>
     </div>
@@ -510,10 +507,10 @@ const App = () => {
         <div className="flex-1 overflow-y-auto bg-slate-50 px-6 pt-6 relative no-scrollbar flex flex-col">
           <header className="flex justify-between items-center mb-6 shrink-0">
             <div>
-              <h1 className="text-xl font-black tracking-tighter italic uppercase">Ads Finance</h1>
+              <h1 className="text-xl font-black tracking-tighter italic uppercase text-slate-900">Ads Finance</h1>
               <div className="flex items-center gap-2 mt-0.5">
-                <p className="text-[8px] font-bold text-blue-600 uppercase tracking-widest">Management v0.0</p>
-                {!supabase && <span className="flex items-center gap-1 bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-tighter shadow-sm border border-amber-200"><DatabaseBackup size={10}/> Local Mode</span>}
+                <p className="text-[8px] font-bold text-blue-600 uppercase tracking-widest">v1.0</p>
+                {!isSupabaseConfigured && <span className="flex items-center gap-1 bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-tighter shadow-sm border border-amber-200"><DatabaseBackup size={10}/> Local Mode</span>}
               </div>
             </div>
             <button onClick={() => setActiveTab('stats')} className={`w-10 h-10 rounded-full border flex items-center justify-center shadow-sm transition-all ${activeTab === 'stats' ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-100 text-slate-400'}`}><BarChart3 size={18}/></button>
@@ -538,22 +535,8 @@ const App = () => {
                         <div className="bg-white rounded-[32px] p-6 shadow-sm border border-slate-100">
                            <h2 className="text-xl font-black text-slate-900 mb-1">{p.name}</h2>
                            <p className="text-2xl font-black text-rose-500 tracking-tight">{formatVND(p.debt)}</p>
-                           <p className="text-[8px] font-bold text-slate-400 uppercase mt-1">Tổng nợ chưa thanh toán</p>
                         </div>
                         <button onClick={() => { setPaymentAmountInput(''); setShowPaymentModal(true); }} className="w-full bg-emerald-600 text-white font-black py-4 rounded-2xl text-[10px] uppercase shadow-lg shadow-emerald-100 active:scale-95 transition-all">Ghi nhận trả tiền</button>
-                        
-                        <div className="bg-white p-5 rounded-[32px] border border-slate-100">
-                          <h3 className="text-[10px] font-black text-slate-900 uppercase mb-4">Lịch sử thanh toán</h3>
-                          <div className="space-y-3">
-                            {p.paymentsHistory.map(h => (
-                              <div key={h.id} className="flex justify-between items-center bg-slate-50/50 p-3 rounded-2xl">
-                                <div><p className="text-[10px] font-bold">{formatDate(h.date)}</p><p className="text-[8px] text-slate-400">{h.note || 'Thanh toán'}</p></div>
-                                <p className="text-xs font-black text-emerald-600">-{formatVND(h.amount)}</p>
-                              </div>
-                            ))}
-                            {p.paymentsHistory.length === 0 && <p className="text-[9px] text-slate-300 text-center py-4">Chưa có giao dịch</p>}
-                          </div>
-                        </div>
                       </div>
                     )
                   })()}
@@ -561,7 +544,7 @@ const App = () => {
               ) : (
                 <div className="space-y-4 pb-24">
                   <div className="flex justify-between items-center"><h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Providers</h3><button onClick={() => {setEditingProvider(null); setShowProviderModal(true);}} className="text-blue-600 font-black text-[10px] uppercase flex items-center gap-1"><PlusCircle size={14}/> Thêm mới</button></div>
-                  {providerSummary.map(p => <div key={p.id} onClick={() => setSelectedProviderId(p.id)} className="bg-white rounded-[32px] border border-slate-100 p-5 shadow-sm flex justify-between items-center active:scale-[0.98] transition-transform"><div><h4 className="font-black text-slate-900">{p.name}</h4><span className="text-[8px] px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded font-black uppercase">Phí thuê: {p.rentalFee}%</span></div><div className="text-right"><p className="text-[8px] font-black text-rose-500 uppercase">Dư nợ</p><p className="text-lg font-black text-rose-500">{formatVND(p.debt)}</p></div></div>)}
+                  {providerSummary.map(p => <div key={p.id} onClick={() => setSelectedProviderId(p.id)} className="bg-white rounded-[32px] border border-slate-100 p-5 shadow-sm flex justify-between items-center active:scale-[0.98] transition-transform"><div><h4 className="font-black text-slate-900">{p.name}</h4><span className="text-[8px] px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded font-black uppercase">Phí: {p.rentalFee}%</span></div><div className="text-right"><p className="text-[8px] font-black text-rose-500 uppercase">Nợ</p><p className="text-lg font-black text-rose-500">{formatVND(p.debt)}</p></div></div>)}
                 </div>
               )
             )}
@@ -618,7 +601,7 @@ const App = () => {
 
         {showShopModal && (
           <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px] z-[100] flex items-end">
-            <div className="bg-white w-full rounded-t-[40px] p-6 pb-10 animate-in slide-in-from-bottom duration-300">
+            <div className="bg-white w-full rounded-t-[40px] p-6 pb-10 animate-in slide-in-from-bottom duration-300 shadow-2xl">
               <div className="w-10 h-1 bg-slate-100 rounded-full mx-auto mb-6"></div>
               <div className="flex justify-between items-center mb-6"><h3 className="text-xl font-black text-slate-900 uppercase italic">{editingShop ? 'Sửa Shop' : 'Thêm Shop'}</h3>{editingShop && <button type="button" onClick={() => handleDeleteShop(editingShop.id)} className="text-rose-500"><Trash2 size={20}/></button>}</div>
               <form onSubmit={handleSaveShop} className="space-y-4">
@@ -627,7 +610,7 @@ const App = () => {
                   <div className="bg-slate-50 p-4 rounded-2xl border"><label className="block text-[8px] font-black text-slate-400 uppercase">Phí thu khách (%)</label><input name="percent" type="number" step="0.1" required defaultValue={editingShop?.percent || ""} className="w-full bg-transparent border-none font-black text-xl text-blue-600 focus:ring-0 p-0"/></div>
                   <div className="bg-slate-50 p-4 rounded-2xl border"><label className="block text-[8px] font-black text-slate-400 uppercase">Provider</label><select name="providerId" required defaultValue={editingShop?.providerId || ""} className="w-full bg-transparent border-none font-bold text-xs p-0 focus:ring-0">{providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
                 </div>
-                <div className="flex gap-3"><button type="button" onClick={() => setShowShopModal(false)} className="flex-1 bg-slate-100 text-slate-500 font-black py-4 rounded-2xl text-[10px] uppercase">Hủy</button><button type="submit" className="flex-[2] bg-blue-600 text-white font-black py-4 rounded-2xl text-[10px] uppercase shadow-lg">Lưu Shop</button></div>
+                <div className="flex gap-3"><button type="button" onClick={() => setShowShopModal(false)} className="flex-1 bg-slate-100 text-slate-500 font-black py-4 rounded-2xl text-[10px] uppercase">Hủy</button><button type="submit" className="flex-[2] bg-blue-600 text-white font-black py-4 rounded-2xl text-[10px] uppercase shadow-lg shadow-blue-200">Lưu Shop</button></div>
               </form>
             </div>
           </div>
@@ -635,13 +618,13 @@ const App = () => {
 
         {showProviderModal && (
           <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px] z-[100] flex items-end">
-            <div className="bg-white w-full rounded-t-[40px] p-6 pb-10 animate-in slide-in-from-bottom duration-300">
+            <div className="bg-white w-full rounded-t-[40px] p-6 pb-10 animate-in slide-in-from-bottom duration-300 shadow-2xl">
               <div className="w-10 h-1 bg-slate-100 rounded-full mx-auto mb-6"></div>
               <div className="flex justify-between items-center mb-6"><h3 className="text-xl font-black text-slate-900 uppercase italic">{editingProvider ? 'Sửa Provider' : 'Thêm Provider'}</h3>{editingProvider && <button type="button" onClick={() => handleDeleteProvider(editingProvider.id)} className="text-rose-500"><Trash2 size={20}/></button>}</div>
               <form onSubmit={handleSaveProvider} className="space-y-4">
                 <div className="bg-slate-50 p-4 rounded-2xl border"><label className="block text-[8px] font-black text-slate-400 uppercase">Tên Provider</label><input name="name" required defaultValue={editingProvider?.name || ""} className="w-full bg-transparent border-none font-bold focus:ring-0 p-0"/></div>
                 <div className="bg-slate-50 p-4 rounded-2xl border"><label className="block text-[8px] font-black text-slate-400 uppercase">Phí thuê (%)</label><input name="rentalFee" type="number" step="0.1" required defaultValue={editingProvider?.rentalFee || ""} className="w-full bg-transparent border-none font-black text-xl text-blue-600 focus:ring-0 p-0"/></div>
-                <div className="flex gap-3"><button type="button" onClick={() => setShowProviderModal(false)} className="flex-1 bg-slate-100 text-slate-500 font-black py-4 rounded-2xl text-[10px] uppercase">Hủy</button><button type="submit" className="flex-[2] bg-indigo-600 text-white font-black py-4 rounded-2xl text-[10px] uppercase shadow-lg">Lưu Provider</button></div>
+                <div className="flex gap-3"><button type="button" onClick={() => setShowProviderModal(false)} className="flex-1 bg-slate-100 text-slate-500 font-black py-4 rounded-2xl text-[10px] uppercase">Hủy</button><button type="submit" className="flex-[2] bg-indigo-600 text-white font-black py-4 rounded-2xl text-[10px] uppercase shadow-lg shadow-indigo-200">Lưu Provider</button></div>
               </form>
             </div>
           </div>
@@ -650,7 +633,7 @@ const App = () => {
         {showPaymentModal && (
           <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px] z-[120] flex items-center justify-center p-6">
             <div className="bg-white w-full rounded-[32px] p-6 shadow-2xl scale-in-center">
-              <h3 className="text-lg font-black uppercase italic mb-6">Thanh toán nợ</h3>
+              <h3 className="text-lg font-black uppercase italic mb-6 text-slate-900">Thanh toán nợ</h3>
               <form onSubmit={handleAddPayment} className="space-y-4">
                 <div className="bg-slate-50 p-4 rounded-2xl border"><label className="block text-[8px] font-black uppercase">Số tiền</label><input name="amount" type="text" inputMode="numeric" required value={paymentAmountInput} onChange={(e) => setPaymentAmountInput(formatNumberInput(e.target.value))} className="w-full bg-transparent border-none font-black text-xl text-emerald-600 p-0 focus:ring-0" placeholder="0"/></div>
                 <div className="bg-slate-50 p-4 rounded-2xl border"><label className="block text-[8px] font-black uppercase">Ngày</label><input type="date" name="date" required defaultValue={getLocalISODate()} className="w-full bg-transparent border-none font-bold text-sm p-0 focus:ring-0"/></div>
