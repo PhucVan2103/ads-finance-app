@@ -1,4 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
+
+/**
+ * Ghi chú dành cho môi trường Local:
+ * 1. Chạy lệnh: npm install @supabase/supabase-js
+ * 2. Mở comment dòng import dưới đây
+ */
+// import { createClient } from '@supabase/supabase-js';
+
 import { 
   LayoutDashboard, 
   BarChart3, 
@@ -36,42 +44,37 @@ import {
 } from 'lucide-react';
 
 // ----------------------------------------------------------------------
-// 1. CẤU HÌNH KẾT NỐI
+// 1. CẤU HÌNH KẾT NỐI (FIX LỖI IMPORT.META VÀ RESOLVE MODULE)
 // ----------------------------------------------------------------------
-// BƯỚC 1: Đảm bảo bạn đã chạy lệnh: npm install @supabase/supabase-js
-// BƯỚC 2: Bỏ dấu // ở dòng import dưới đây khi chạy ở Local:
-// import { createClient } from '@supabase/supabase-js';
-
-// Logic cấu hình thông minh:
-let envUrl = '';
-let envKey = '';
-
-try {
-  // @ts-ignore
-  const meta = import.meta;
-  if (meta && meta.env) {
-    envUrl = meta.env.VITE_SUPABASE_URL || '';
-    envKey = meta.env.VITE_SUPABASE_ANON_KEY || '';
+// Hàm lấy biến môi trường an toàn để không làm sập trình biên dịch preview
+const getSafeEnv = (key) => {
+  try {
+    // Sử dụng cách truy cập gián tiếp để tránh lỗi esbuild khi gặp import.meta
+    const env = (import.meta as any).env;
+    return env ? env[key] : '';
+  } catch (e) {
+    return '';
   }
-} catch (e) {}
+};
 
-const supabaseUrl = envUrl;
-const supabaseAnonKey = envKey;
+const supabaseUrl = getSafeEnv('VITE_SUPABASE_URL');
+const supabaseAnonKey = getSafeEnv('VITE_SUPABASE_ANON_KEY');
 
+// Khởi tạo Supabase Client an toàn
 let supabase = null;
-const isSupabaseConfigured = supabaseUrl && supabaseAnonKey && typeof createClient !== 'undefined';
+const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey && typeof createClient !== 'undefined');
 
 if (isSupabaseConfigured) {
   try {
     // @ts-ignore
     supabase = createClient(supabaseUrl, supabaseAnonKey);
   } catch (e) {
-    console.warn("Không thể khởi tạo Supabase Client:", e);
+    console.warn("Lỗi khởi tạo Supabase:", e);
   }
 }
 // ----------------------------------------------------------------------
 
-// --- CÁC HÀM TIỆN ÍCH (UTILS) ---
+// --- UTILS ---
 const getLocalISODate = (d = new Date()) => {
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -142,7 +145,6 @@ const App = () => {
     return () => clearInterval(timer);
   }, []);
 
-  // ĐỒNG BỘ DỮ LIỆU LOCALSTORAGE (CHỈ KHI KHÔNG CÓ SUPABASE)
   useEffect(() => {
     if (!supabase) {
       localStorage.setItem('m_shops', JSON.stringify(shops));
@@ -152,7 +154,6 @@ const App = () => {
     }
   }, [shops, adsLogs, providers, providerPayments]);
 
-  // TẢI DỮ LIỆU KHỞI TẠO
   useEffect(() => {
     const fetchData = async () => {
       if (!supabase) {
@@ -181,18 +182,16 @@ const App = () => {
 
       try {
         const [
-          { data: pData, error: pError },
-          { data: sData, error: sError },
-          { data: lData, error: lError },
-          { data: ppData, error: ppError }
+          { data: pData },
+          { data: sData },
+          { data: lData },
+          { data: ppData }
         ] = await Promise.all([
           supabase.from('providers').select('*'),
           supabase.from('shops').select('*'),
           supabase.from('ads_logs').select('*'),
           supabase.from('provider_payments').select('*')
         ]);
-
-        if (pError || sError || lError || ppError) throw new Error("Lỗi fetch Supabase");
 
         if (pData) setProviders(pData.map(p => ({ ...p, rentalFee: Number(p.rental_fee) || 0 })));
         if (sData) setShops(sData.map(s => ({ ...s, percent: Number(s.percent) || 0, providerId: s.provider_id })));
@@ -210,16 +209,15 @@ const App = () => {
           providerId: pp.provider_id 
         })));
       } catch (error) {
-        console.error("Fetch Error:", error);
+        console.error("Lỗi fetch dữ liệu:", error);
       } finally {
         setIsLoading(false);
       }
     };
 
     fetchData();
-  }, []);
+  }, [isSupabaseConfigured]);
 
-  // --- LOGIC TÍNH TOÁN ---
   const currentMonthLogs = useMemo(() => {
     return adsLogs.filter(log => {
       const d = new Date(log.date);
@@ -387,7 +385,7 @@ const App = () => {
     const payData = { provider_id: selectedProviderId, amount: parseFloat(fd.get('amount').toString().replace(/\D/g, '')), date: fd.get('date'), note: fd.get('note') };
     if (supabase) {
       const { data } = await supabase.from('provider_payments').insert([payData]).select();
-      if (data) setProviderPayments([...providerPayments, { ...data[0], providerId: data[0].provider_id }]);
+      if (data) setProviderPayments([...providerPayments, { ...data[0], amount: Number(data[0].amount), providerId: data[0].provider_id }]);
     } else {
       setProviderPayments([...providerPayments, { ...payData, id: Date.now().toString(), providerId: payData.provider_id }]);
     }
@@ -406,9 +404,8 @@ const App = () => {
 
   const HomeView = () => (
     <div className="space-y-5 pb-24">
-      {/* NHÓM PHẦN HIỂN THỊ TỔNG QUAN THÁNG TRONG 1 KHUNG */}
+      {/* Dashboard Thống kê tháng */}
       <div className="bg-white p-2 rounded-[32px] border border-slate-100 shadow-sm space-y-2">
-        {/* Monthly Profit Card */}
         <div className="bg-gradient-to-br from-indigo-600 via-blue-700 to-slate-900 rounded-[26px] p-6 text-white relative overflow-hidden">
           <div className="relative z-10">
             <p className="text-blue-100/60 text-[10px] font-bold uppercase tracking-widest mb-1">Lợi nhuận ròng T.{viewMonth + 1}/{viewYear}</p>
@@ -427,10 +424,9 @@ const App = () => {
           <div className="absolute top-0 right-0 p-4 opacity-10"><AlertCircle size={80}/></div>
         </div>
 
-        {/* Monthly Stats Grid */}
         <div className="grid grid-cols-2 gap-2">
           <div className="bg-slate-50/80 p-4 rounded-[22px] text-center border border-slate-100/50">
-            <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Tổng đã thu</p>
+            <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Tổng đã thu tháng</p>
             <p className="text-sm font-black text-slate-900">{formatVND(totals.revenue)}</p>
           </div>
           <div className="bg-slate-50/80 p-4 rounded-[22px] text-center border border-slate-100/50">
@@ -440,7 +436,7 @@ const App = () => {
         </div>
       </div>
 
-      {/* Daily View Section */}
+      {/* Lịch và Nhật ký ngày */}
       <div>
         <div className="flex justify-between items-center bg-white p-1.5 rounded-[24px] border border-slate-100 shadow-sm mb-4 w-full">
           {[...Array(7)].map((_, i) => {
@@ -456,29 +452,18 @@ const App = () => {
           })}
         </div>
 
-        {/* TỔNG HỢP NGÀY */}
+        {/* Tổng hợp ngày chọn */}
         <div className="bg-white rounded-[28px] p-5 border border-slate-100 shadow-sm mb-5 relative overflow-hidden">
           <div className="flex items-center gap-2 mb-4">
              <Coins size={16} className="text-amber-500" />
              <h3 className="text-[10px] font-black text-slate-900 uppercase tracking-widest">Tổng hợp ngày {selectedDate.split('-')[2]}/{selectedDate.split('-')[1]}</h3>
           </div>
           <div className="grid grid-cols-3 gap-4 relative z-10">
-            <div>
-              <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Chi gốc</p>
-              <p className="text-[13px] font-black text-slate-700">{formatVND(selectedDayTotals.spend)}</p>
-            </div>
-            <div className="border-l border-slate-100 pl-4">
-              <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Phí thu</p>
-              <p className="text-[13px] font-black text-indigo-600">+{formatVND(selectedDayTotals.fees)}</p>
-            </div>
-            <div className="border-l border-slate-100 pl-4">
-              <p className="text-[8px] font-black text-blue-600 uppercase mb-1">Tổng thu</p>
-              <p className="text-[13px] font-black text-blue-600">{formatVND(selectedDayTotals.total)}</p>
-            </div>
+            <div><p className="text-[8px] font-black text-slate-400 uppercase mb-1">Chi gốc</p><p className="text-[13px] font-black text-slate-700">{formatVND(selectedDayTotals.spend)}</p></div>
+            <div className="border-l border-slate-100 pl-4"><p className="text-[8px] font-black text-slate-400 uppercase mb-1">Phí thu</p><p className="text-[13px] font-black text-indigo-600">+{formatVND(selectedDayTotals.fees)}</p></div>
+            <div className="border-l border-slate-100 pl-4"><p className="text-[8px] font-black text-blue-600 uppercase mb-1">Tổng thu</p><p className="text-[13px] font-black text-blue-600">{formatVND(selectedDayTotals.total)}</p></div>
           </div>
-          <div className="absolute -bottom-2 -right-2 opacity-[0.03] text-slate-900">
-            <Coins size={80} />
-          </div>
+          <div className="absolute -bottom-2 -right-2 opacity-[0.03] text-slate-900"><Coins size={80}/></div>
         </div>
 
         <div className="space-y-3">
@@ -514,7 +499,7 @@ const App = () => {
   );
 
   return (
-    <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 select-none">
+    <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 select-none text-slate-900">
       <div className="relative mx-auto border-[8px] border-slate-800 rounded-[60px] h-[844px] w-[390px] bg-white shadow-2xl overflow-hidden flex flex-col">
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-8 bg-black rounded-b-3xl z-[60] mt-1"></div>
         <div className="h-11 flex justify-between items-center px-8 z-50 text-black font-bold text-[12px] pt-2">
@@ -525,10 +510,10 @@ const App = () => {
         <div className="flex-1 overflow-y-auto bg-slate-50 px-6 pt-6 relative no-scrollbar flex flex-col">
           <header className="flex justify-between items-center mb-6 shrink-0">
             <div>
-              <h1 className="text-xl font-black tracking-tighter italic uppercase text-slate-900">Ads Finance</h1>
+              <h1 className="text-xl font-black tracking-tighter italic uppercase">Ads Finance</h1>
               <div className="flex items-center gap-2 mt-0.5">
-                <p className="text-[8px] font-bold text-blue-600 uppercase tracking-widest">v1.0</p>
-                {!isSupabaseConfigured && <span className="flex items-center gap-1 bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-tighter shadow-sm border border-amber-200"><DatabaseBackup size={10}/> Local Mode</span>}
+                <p className="text-[8px] font-bold text-blue-600 uppercase tracking-widest">Management v0.0</p>
+                {!supabase && <span className="flex items-center gap-1 bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-tighter shadow-sm border border-amber-200"><DatabaseBackup size={10}/> Local Mode</span>}
               </div>
             </div>
             <button onClick={() => setActiveTab('stats')} className={`w-10 h-10 rounded-full border flex items-center justify-center shadow-sm transition-all ${activeTab === 'stats' ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-100 text-slate-400'}`}><BarChart3 size={18}/></button>
@@ -537,14 +522,14 @@ const App = () => {
           <div className="flex-1">
             {activeTab === 'home' && <HomeView />}
             {activeTab === 'shops' && (
-              <div className="space-y-4">
+              <div className="space-y-4 pb-24">
                 <div className="flex justify-between items-center"><h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Cửa hàng</h3><button onClick={() => { setEditingShop(null); setShowShopModal(true); }} className="text-blue-600 font-black text-[10px] uppercase flex items-center gap-1"><PlusCircle size={14}/> Thêm Shop</button></div>
-                {shops.map(s => <div key={s.id} onClick={() => {setEditingShop(s); setShowShopModal(true);}} className="bg-white p-5 rounded-[28px] border border-slate-100 shadow-sm flex justify-between items-center"><div className="flex items-center gap-4"><div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center"><Store size={24}/></div><div><h4 className="font-black text-slate-900 text-sm">{s.name}</h4><span className="text-[8px] px-1.5 py-0.5 bg-emerald-50 text-emerald-600 rounded font-black uppercase">Phí: {s.percent}%</span></div></div><ChevronRight size={18} className="text-slate-300"/></div>)}
+                {shops.map(s => <div key={s.id} onClick={() => {setEditingShop(s); setShowShopModal(true);}} className="bg-white p-5 rounded-[28px] border border-slate-100 shadow-sm flex justify-between items-center active:scale-[0.98] transition-transform"><div className="flex items-center gap-4"><div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center"><Store size={24}/></div><div><h4 className="font-black text-slate-900 text-sm">{s.name}</h4><span className="text-[8px] px-1.5 py-0.5 bg-emerald-50 text-emerald-600 rounded font-black uppercase">Phí: {s.percent}%</span></div></div><ChevronRight size={18} className="text-slate-300"/></div>)}
               </div>
             )}
             {activeTab === 'providers' && (
               selectedProviderId ? (
-                <div className="space-y-6">
+                <div className="space-y-6 pb-24">
                   <button onClick={() => setSelectedProviderId(null)} className="flex items-center gap-2 text-slate-400 font-black text-[10px] uppercase"><ChevronLeft size={16}/> Quay lại</button>
                   {(() => {
                     const p = providerSummary.find(x => x.id === selectedProviderId);
@@ -552,31 +537,48 @@ const App = () => {
                       <div className="space-y-4">
                         <div className="bg-white rounded-[32px] p-6 shadow-sm border border-slate-100">
                            <h2 className="text-xl font-black text-slate-900 mb-1">{p.name}</h2>
-                           <p className="text-[10px] font-black text-rose-500 uppercase">Còn nợ: {formatVND(p.debt)}</p>
+                           <p className="text-2xl font-black text-rose-500 tracking-tight">{formatVND(p.debt)}</p>
+                           <p className="text-[8px] font-bold text-slate-400 uppercase mt-1">Tổng nợ chưa thanh toán</p>
                         </div>
-                        <button onClick={() => setShowPaymentModal(true)} className="w-full bg-emerald-600 text-white font-black py-4 rounded-2xl text-[10px] uppercase shadow-lg shadow-emerald-100">Trả tiền Provider</button>
+                        <button onClick={() => { setPaymentAmountInput(''); setShowPaymentModal(true); }} className="w-full bg-emerald-600 text-white font-black py-4 rounded-2xl text-[10px] uppercase shadow-lg shadow-emerald-100 active:scale-95 transition-all">Ghi nhận trả tiền</button>
+                        
+                        <div className="bg-white p-5 rounded-[32px] border border-slate-100">
+                          <h3 className="text-[10px] font-black text-slate-900 uppercase mb-4">Lịch sử thanh toán</h3>
+                          <div className="space-y-3">
+                            {p.paymentsHistory.map(h => (
+                              <div key={h.id} className="flex justify-between items-center bg-slate-50/50 p-3 rounded-2xl">
+                                <div><p className="text-[10px] font-bold">{formatDate(h.date)}</p><p className="text-[8px] text-slate-400">{h.note || 'Thanh toán'}</p></div>
+                                <p className="text-xs font-black text-emerald-600">-{formatVND(h.amount)}</p>
+                              </div>
+                            ))}
+                            {p.paymentsHistory.length === 0 && <p className="text-[9px] text-slate-300 text-center py-4">Chưa có giao dịch</p>}
+                          </div>
+                        </div>
                       </div>
                     )
                   })()}
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-4 pb-24">
                   <div className="flex justify-between items-center"><h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Providers</h3><button onClick={() => {setEditingProvider(null); setShowProviderModal(true);}} className="text-blue-600 font-black text-[10px] uppercase flex items-center gap-1"><PlusCircle size={14}/> Thêm mới</button></div>
-                  {providerSummary.map(p => <div key={p.id} onClick={() => setSelectedProviderId(p.id)} className="bg-white rounded-[32px] border border-slate-100 p-5 shadow-sm flex justify-between items-center"><div><h4 className="font-black text-slate-900">{p.name}</h4><span className="text-[8px] px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded font-black uppercase">Phí: {p.rentalFee}%</span></div><div className="text-right"><p className="text-[8px] font-black text-rose-500 uppercase">Nợ</p><p className="text-lg font-black text-rose-500">{formatVND(p.debt)}</p></div></div>)}
+                  {providerSummary.map(p => <div key={p.id} onClick={() => setSelectedProviderId(p.id)} className="bg-white rounded-[32px] border border-slate-100 p-5 shadow-sm flex justify-between items-center active:scale-[0.98] transition-transform"><div><h4 className="font-black text-slate-900">{p.name}</h4><span className="text-[8px] px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded font-black uppercase">Phí thuê: {p.rentalFee}%</span></div><div className="text-right"><p className="text-[8px] font-black text-rose-500 uppercase">Dư nợ</p><p className="text-lg font-black text-rose-500">{formatVND(p.debt)}</p></div></div>)}
                 </div>
               )
             )}
             {activeTab === 'stats' && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between bg-white px-5 py-4 rounded-[28px] border border-slate-100"><button onClick={() => setViewMonth(viewMonth === 0 ? 11 : viewMonth - 1)}><ChevronLeft size={24}/></button><h2 className="text-sm font-black uppercase tracking-tight">Tháng {viewMonth + 1}/{viewYear}</h2><button onClick={() => setViewMonth(viewMonth === 11 ? 0 : viewMonth + 1)}><ChevronRight size={24}/></button></div>
-                <div className="bg-white p-5 rounded-[32px] border border-slate-100 h-[450px] flex flex-col">
-                   <h3 className="text-[10px] font-black text-slate-400 uppercase mb-4">Lợi nhuận theo ngày</h3>
-                   <div className="flex-1 overflow-y-auto no-scrollbar space-y-3">
+              <div className="space-y-4 pb-24">
+                <div className="flex items-center justify-between bg-white px-5 py-4 rounded-[28px] border border-slate-100 shadow-sm"><button onClick={() => setViewMonth(viewMonth === 0 ? 11 : viewMonth - 1)} className="p-2"><ChevronLeftCircle size={24} className="text-slate-200"/></button><h2 className="text-sm font-black uppercase tracking-tight">Tháng {viewMonth + 1}/{viewYear}</h2><button onClick={() => setViewMonth(viewMonth === 11 ? 0 : viewMonth + 1)} className="p-2"><ChevronRightCircle size={24} className="text-slate-200"/></button></div>
+                <div className="bg-white p-5 rounded-[32px] border border-slate-100 h-[450px] flex flex-col shadow-sm">
+                   <h3 className="text-[10px] font-black text-slate-400 uppercase mb-4 tracking-widest">Lợi nhuận theo ngày</h3>
+                   <div className="flex-1 overflow-y-auto no-scrollbar space-y-4">
                       {[...statsByDay].reverse().map(d => (
-                        <div key={d.date} className="space-y-1">
-                          <div className="flex justify-between text-[9px] font-black text-slate-400 uppercase"><span>{d.day}/{viewMonth+1}</span><span>{formatVND(d.profit)}</span></div>
-                          <div className="h-3 w-full bg-slate-50 rounded-full overflow-hidden">
-                             <div className={`h-full rounded-full ${d.profit > 0 ? 'bg-blue-500' : 'bg-rose-500'}`} style={{width: `${(Math.abs(d.profit)/maxAbsProfit)*100}%`}}></div>
+                        <div key={d.date} className="space-y-1.5">
+                          <div className="flex justify-between text-[9px] font-black uppercase">
+                            <span className="text-slate-400">{d.day}/{viewMonth+1}</span>
+                            <span className={d.profit > 0 ? 'text-slate-700' : 'text-rose-500'}>{formatVND(d.profit)}</span>
+                          </div>
+                          <div className="h-3 w-full bg-slate-50 rounded-full overflow-hidden border border-slate-100/50">
+                             <div className={`h-full rounded-full transition-all duration-700 ${d.profit > 0 ? 'bg-blue-500' : 'bg-rose-500'}`} style={{width: `${(Math.abs(d.profit)/maxAbsProfit)*100}%`}}></div>
                           </div>
                         </div>
                       ))}
@@ -586,7 +588,7 @@ const App = () => {
             )}
           </div>
 
-          {activeTab === 'home' && <button onClick={() => { setEditingLog(null); setAmountInput(''); setShowAddLogModal(true); }} className="absolute bottom-[100px] right-6 w-14 h-14 bg-blue-600 text-white rounded-2xl shadow-xl flex items-center justify-center z-40 border-4 border-white"><Plus size={28} strokeWidth={3}/></button>}
+          {activeTab === 'home' && <button onClick={() => { setEditingLog(null); setAmountInput(''); setShowAddLogModal(true); }} className="absolute bottom-[100px] right-6 w-14 h-14 bg-blue-600 text-white rounded-2xl shadow-xl flex items-center justify-center z-40 border-4 border-white active:scale-90 transition-all"><Plus size={28} strokeWidth={3}/></button>}
         </div>
 
         <nav className="bg-white border-t border-slate-100 px-6 py-5 pb-8 flex justify-around items-center rounded-t-[32px] shadow-lg shrink-0">
@@ -598,7 +600,7 @@ const App = () => {
         {/* --- MODALS --- */}
         {showAddLogModal && (
           <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px] z-[100] flex items-end">
-            <div className="bg-white w-full rounded-t-[40px] p-6 pb-10 animate-in slide-in-from-bottom duration-300">
+            <div className="bg-white w-full rounded-t-[40px] p-6 pb-10 animate-in slide-in-from-bottom duration-300 shadow-2xl">
               <div className="w-10 h-1 bg-slate-100 rounded-full mx-auto mb-6"></div>
               <div className="flex justify-between items-center mb-6"><h3 className="text-xl font-black text-slate-900 uppercase italic">{editingLog ? 'Sửa chi tiêu' : 'Nhập chi tiêu'}</h3>{editingLog && <button type="button" onClick={() => handleDeleteLog(editingLog.id)} className="text-rose-500"><Trash2 size={20}/></button>}</div>
               <form onSubmit={handleSaveLog} className="space-y-4">
@@ -608,7 +610,7 @@ const App = () => {
                 </div>
                 <div className="bg-slate-50 p-5 rounded-3xl border text-center"><label className="block text-[8px] font-black text-slate-400 uppercase mb-2">Số tiền gốc (Spend)</label><input name="amount" type="text" inputMode="numeric" required value={amountInput} onChange={(e) => setAmountInput(formatNumberInput(e.target.value))} className="w-full bg-transparent border-none text-center font-black text-3xl text-blue-600 focus:ring-0 p-0" placeholder="0"/></div>
                 <div className="bg-slate-50 p-4 rounded-2xl flex justify-between items-center border"><div><label className="block text-[10px] font-black uppercase">Đã thu tiền khách</label></div><input type="checkbox" name="isPaid" defaultChecked={editingLog ? editingLog.status !== 'unpaid' : true} className="w-5 h-5 accent-blue-600"/></div>
-                <div className="flex gap-3"><button type="button" onClick={() => setShowAddLogModal(false)} className="flex-1 bg-slate-100 text-slate-500 font-black py-4 rounded-2xl text-[10px] uppercase">Hủy</button><button type="submit" className="flex-[2] bg-blue-600 text-white font-black py-4 rounded-2xl text-[10px] uppercase">Lưu giao dịch</button></div>
+                <div className="flex gap-3"><button type="button" onClick={() => setShowAddLogModal(false)} className="flex-1 bg-slate-100 text-slate-500 font-black py-4 rounded-2xl text-[10px] uppercase">Hủy</button><button type="submit" className="flex-[2] bg-blue-600 text-white font-black py-4 rounded-2xl text-[10px] uppercase shadow-lg shadow-blue-200">Lưu giao dịch</button></div>
               </form>
             </div>
           </div>
@@ -616,16 +618,16 @@ const App = () => {
 
         {showShopModal && (
           <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px] z-[100] flex items-end">
-            <div className="bg-white w-full rounded-t-[40px] p-6 pb-10">
+            <div className="bg-white w-full rounded-t-[40px] p-6 pb-10 animate-in slide-in-from-bottom duration-300">
               <div className="w-10 h-1 bg-slate-100 rounded-full mx-auto mb-6"></div>
               <div className="flex justify-between items-center mb-6"><h3 className="text-xl font-black text-slate-900 uppercase italic">{editingShop ? 'Sửa Shop' : 'Thêm Shop'}</h3>{editingShop && <button type="button" onClick={() => handleDeleteShop(editingShop.id)} className="text-rose-500"><Trash2 size={20}/></button>}</div>
               <form onSubmit={handleSaveShop} className="space-y-4">
                 <div className="bg-slate-50 p-4 rounded-2xl border"><label className="block text-[8px] font-black text-slate-400 uppercase">Tên Shop</label><input name="name" required defaultValue={editingShop?.name || ""} className="w-full bg-transparent border-none font-bold focus:ring-0 p-0"/></div>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-slate-50 p-4 rounded-2xl border"><label className="block text-[8px] font-black text-slate-400 uppercase">Phí (%)</label><input name="percent" type="number" step="0.1" required defaultValue={editingShop?.percent || ""} className="w-full bg-transparent border-none font-black text-xl text-blue-600 focus:ring-0 p-0"/></div>
+                  <div className="bg-slate-50 p-4 rounded-2xl border"><label className="block text-[8px] font-black text-slate-400 uppercase">Phí thu khách (%)</label><input name="percent" type="number" step="0.1" required defaultValue={editingShop?.percent || ""} className="w-full bg-transparent border-none font-black text-xl text-blue-600 focus:ring-0 p-0"/></div>
                   <div className="bg-slate-50 p-4 rounded-2xl border"><label className="block text-[8px] font-black text-slate-400 uppercase">Provider</label><select name="providerId" required defaultValue={editingShop?.providerId || ""} className="w-full bg-transparent border-none font-bold text-xs p-0 focus:ring-0">{providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
                 </div>
-                <div className="flex gap-3"><button type="button" onClick={() => setShowShopModal(false)} className="flex-1 bg-slate-100 text-slate-500 font-black py-4 rounded-2xl text-[10px] uppercase">Hủy</button><button type="submit" className="flex-[2] bg-blue-600 text-white font-black py-4 rounded-2xl text-[10px] uppercase">Lưu Shop</button></div>
+                <div className="flex gap-3"><button type="button" onClick={() => setShowShopModal(false)} className="flex-1 bg-slate-100 text-slate-500 font-black py-4 rounded-2xl text-[10px] uppercase">Hủy</button><button type="submit" className="flex-[2] bg-blue-600 text-white font-black py-4 rounded-2xl text-[10px] uppercase shadow-lg">Lưu Shop</button></div>
               </form>
             </div>
           </div>
@@ -633,13 +635,13 @@ const App = () => {
 
         {showProviderModal && (
           <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px] z-[100] flex items-end">
-            <div className="bg-white w-full rounded-t-[40px] p-6 pb-10">
+            <div className="bg-white w-full rounded-t-[40px] p-6 pb-10 animate-in slide-in-from-bottom duration-300">
               <div className="w-10 h-1 bg-slate-100 rounded-full mx-auto mb-6"></div>
               <div className="flex justify-between items-center mb-6"><h3 className="text-xl font-black text-slate-900 uppercase italic">{editingProvider ? 'Sửa Provider' : 'Thêm Provider'}</h3>{editingProvider && <button type="button" onClick={() => handleDeleteProvider(editingProvider.id)} className="text-rose-500"><Trash2 size={20}/></button>}</div>
               <form onSubmit={handleSaveProvider} className="space-y-4">
                 <div className="bg-slate-50 p-4 rounded-2xl border"><label className="block text-[8px] font-black text-slate-400 uppercase">Tên Provider</label><input name="name" required defaultValue={editingProvider?.name || ""} className="w-full bg-transparent border-none font-bold focus:ring-0 p-0"/></div>
                 <div className="bg-slate-50 p-4 rounded-2xl border"><label className="block text-[8px] font-black text-slate-400 uppercase">Phí thuê (%)</label><input name="rentalFee" type="number" step="0.1" required defaultValue={editingProvider?.rentalFee || ""} className="w-full bg-transparent border-none font-black text-xl text-blue-600 focus:ring-0 p-0"/></div>
-                <div className="flex gap-3"><button type="button" onClick={() => setShowProviderModal(false)} className="flex-1 bg-slate-100 text-slate-500 font-black py-4 rounded-2xl text-[10px] uppercase">Hủy</button><button type="submit" className="flex-[2] bg-indigo-600 text-white font-black py-4 rounded-2xl text-[10px] uppercase">Lưu Provider</button></div>
+                <div className="flex gap-3"><button type="button" onClick={() => setShowProviderModal(false)} className="flex-1 bg-slate-100 text-slate-500 font-black py-4 rounded-2xl text-[10px] uppercase">Hủy</button><button type="submit" className="flex-[2] bg-indigo-600 text-white font-black py-4 rounded-2xl text-[10px] uppercase shadow-lg">Lưu Provider</button></div>
               </form>
             </div>
           </div>
@@ -651,9 +653,9 @@ const App = () => {
               <h3 className="text-lg font-black uppercase italic mb-6">Thanh toán nợ</h3>
               <form onSubmit={handleAddPayment} className="space-y-4">
                 <div className="bg-slate-50 p-4 rounded-2xl border"><label className="block text-[8px] font-black uppercase">Số tiền</label><input name="amount" type="text" inputMode="numeric" required value={paymentAmountInput} onChange={(e) => setPaymentAmountInput(formatNumberInput(e.target.value))} className="w-full bg-transparent border-none font-black text-xl text-emerald-600 p-0 focus:ring-0" placeholder="0"/></div>
-                <div className="bg-slate-50 p-4 rounded-2xl border"><label className="block text-[8px] font-black uppercase">Ngày</label><input name="date" type="date" required defaultValue={getLocalISODate()} className="w-full bg-transparent border-none font-bold text-sm p-0 focus:ring-0"/></div>
+                <div className="bg-slate-50 p-4 rounded-2xl border"><label className="block text-[8px] font-black uppercase">Ngày</label><input type="date" name="date" required defaultValue={getLocalISODate()} className="w-full bg-transparent border-none font-bold text-sm p-0 focus:ring-0"/></div>
                 <div className="bg-slate-50 p-4 rounded-2xl border"><label className="block text-[8px] font-black uppercase">Ghi chú</label><input name="note" className="w-full bg-transparent border-none font-bold text-sm p-0 focus:ring-0" placeholder="Chuyển khoản..."/></div>
-                <button type="submit" className="w-full py-4 font-black text-[10px] uppercase text-white bg-emerald-600 rounded-2xl shadow-lg">Xác nhận</button>
+                <button type="submit" className="w-full py-4 font-black text-[10px] uppercase text-white bg-emerald-600 rounded-2xl shadow-lg active:scale-95 transition-all">Xác nhận</button>
                 <button type="button" onClick={() => setShowPaymentModal(false)} className="w-full text-[10px] font-bold text-slate-400 uppercase mt-2">Hủy</button>
               </form>
             </div>
